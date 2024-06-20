@@ -235,86 +235,7 @@ class BDCM(nn.Module):
         x = torch.cat((x, diff), 1)
         return x
 
-
 class RepViT(nn.Module):
-    def __init__(self, cfgs, num_classes=1000, distillation=False, in_chan=1, feature_map=[4]):
-        super(RepViT, self).__init__()
-        # setting of inverted residual blocks
-        self.cfgs = cfgs
-        self.feature_map = feature_map
-        # building first layer
-        input_channel = self.cfgs[0][2]
-        patch_embed = torch.nn.Sequential(Conv2d_BN(in_chan, input_channel // 2, 3, 2, 1), torch.nn.GELU(),
-                                          Conv2d_BN(input_channel // 2, input_channel, 3, 2, 1))
-        layers = [patch_embed]
-        # building inverted residual blocks
-        block = RepViTBlock
-        for k, t, c, use_se, use_hs, s in self.cfgs:
-            output_channel = _make_divisible(c, 8)
-            exp_size = _make_divisible(input_channel * t, 8)
-            layers.append(block(input_channel, exp_size, output_channel, k, s, use_se, use_hs))
-            input_channel = output_channel
-        self.features = nn.ModuleList(layers)
-        self.classifier = Classfier(2 * output_channel, num_classes, distillation)
-        # self.classifier = Classfier(output_channel, num_classes, distillation)
-        # self.conv_last = Conv2d_BN(512, 512, 1, 1, 0)
-        self.bdcm = BDCM(output_channel)
-
-        self.vess = VAM_v1(1)
-        # 177320
-        self.VGFE = nn.ModuleList([VGFE(40),
-                                   VGFE(80),
-                                   VGFE(160),
-                                   VGFE(320)])
-
-    def forward(self, x):
-
-        vem = self.vess(x)
-        vem1 = F.avg_pool2d(vem, kernel_size=4, stride=4)
-        vem2 = F.avg_pool2d(vem1, kernel_size=2, stride=2)
-        vem3 = F.avg_pool2d(vem2, kernel_size=2, stride=2)
-        vem4 = F.avg_pool2d(vem3, kernel_size=2, stride=2)
-        vems = [vem1, vem2, vem3, vem4]
-
-        # stage_idx = [5, 11, 31, 34]
-        # [0,4,8,22]
-        # stage的起始idx
-        # m2: 3,7,21 downsample
-        # down_sample = [0, 4, 8, 22]
-        # stage_start = [1, 4, 8, 22]
-        # stage_end = [3, 7, 21, 24]
-        stage_end = [
-            2, 5, 15, 17
-        ]
-        stage_end = [0, 3, 6, 16]
-        # 获取目标stage在layers中的index
-        # target_stages = [stage_end[i] for i in self.feature_map]
-        target_stages = [17]
-        features = []
-        for i in range(len(self.features)):
-            # print(x.shape[1],i)
-            x = self.features[i](x)
-
-            if i in stage_end:
-                #    #print(i,x.shape[1])
-                x = self.VGFE[stage_end.index(i)](x, vems[stage_end.index(i)])
-                # x = self.VGFE[stage_end.index(i)](x)
-            if i in target_stages:
-                features.append(x)
-
-        x = self.bdcm(x)
-        # diff = torch.abs(x-torch.flip(x,dims=[3]))
-        # diff = self.conv_last(diff)
-        # x = torch.cat((x, diff), 1)
-
-        x = torch.nn.functional.adaptive_avg_pool2d(x, 1).flatten(1)
-        # x = torch.cat((x, diff), 1)
-        x = self.classifier(x)
-        if self.feature_map is not None:
-            return x, features
-        return x
-
-class RepViT2(nn.Module):
     def __init__(self, cfgs, num_classes=1000, distillation=False, in_chan=1, feature_map=[4]):
         super(RepViT2, self).__init__()
         # setting of inverted residual blocks
@@ -354,19 +275,15 @@ class RepViT2(nn.Module):
         vem4 = F.avg_pool2d(vem3, kernel_size=2, stride=2)
         vems = [vem1, vem2, vem3, vem4]
 
-        # stage_idx = [5, 11, 31, 34]
-        # [0,4,8,22]
-        # stage的起始idx
-        # m2: 3,7,21 downsample
-        # down_sample = [0, 4, 8, 22]
-        # stage_start = [1, 4, 8, 22]
-        # stage_end = [3, 7, 21, 24]
+        #the end index of 4 stages
         stage_end = [
             3, 7, 23, 26
         ]
         #stage_end = [0,4,8,24]
         #stage_end = [0, 3, 6, 16]
         # 获取目标stage在layers中的index
+        if self.feature_map is None:
+            target_stages = [26]
         target_stages = [stage_end[i] for i in self.feature_map]
         #target_stages = [26]
         features = []
@@ -391,54 +308,22 @@ class RepViT2(nn.Module):
         # x = torch.cat((x, diff), 1)
         x = self.classifier(x)
         if self.feature_map is not None:
-            return x#, features
+            return x, features
+            # x for CELoss, features for our designed SymLoss
         return x
 
 
 from timm.models import register_model
 
-
 @register_model
-def SSNet(pretrained=False, num_classes=2, distillation=False, feature_map=None):
-    """
-    Constructs a MobileNetV3-Large model
-    """
-    cfgs = [
-        [3, 2, 40, 1, 0, 1],
-        [3, 2, 40, 0, 0, 1],
-
-        [3, 2, 80, 0, 0, 2],
-
-        [3, 2, 80, 1, 0, 1],
-        [3, 2, 80, 0, 0, 1],
-
-        [3, 2, 160, 0, 1, 2],
-
-        [3, 2, 160, 1, 1, 1],
-        [3, 2, 160, 0, 1, 1],
-        [3, 2, 160, 1, 1, 1],
-        [3, 2, 160, 0, 1, 1],
-        [3, 2, 160, 1, 1, 1],
-        [3, 2, 160, 0, 1, 1],
-        [3, 2, 160, 1, 1, 1],
-        [3, 2, 160, 0, 1, 1],
-        [3, 2, 160, 0, 1, 1],
-
-        [3, 2, 320, 0, 1, 2],
-
-        [3, 2, 320, 1, 1, 1],
-    ]
-    return RepViT(cfgs,
-                  num_classes=num_classes,
-                  distillation=distillation,
-                  feature_map=feature_map)
-
-
-@register_model
-def SSNet2(pretrained=False,
+def VANet(pretrained=False,
            num_classes=2,
            distillation=False,
            feature_map=None):
+    # param: feature_map
+    # means using the feature map of different stage for deep symmetry supervision
+    # experiments setting: feature_map = [3], using the features of 4th stage for symloss
+               
     """
     Constructs a MobileNetV3-Large model
     """
@@ -485,6 +370,6 @@ def SSNet2(pretrained=False,
 
 
 if __name__ == '__main__':
-    model = SSNet2()
+    model = VANet()
 
     print(model)
