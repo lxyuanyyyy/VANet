@@ -4,8 +4,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 if __name__=='__main__':
-    #img = nibabel.load(r'D:/Datasets/PRoVe/ProVe-IT-01-001/MNI_mCTA1_brain.nii.gz')
-    img = sitk.ReadImage(r'D:/Datasets/MyRegistration/ProVe-IT-01-001/MCA_mCTA1.nii.gz')
+    #img = nibabel.load(r'D:/Datasets/PRoVe/01-001/MNI_mCTA1_brain.nii.gz')
+    img = sitk.ReadImage(r'D:/Datasets/MyRegistration/01-001/MCA_mCTA1.nii.gz')
     data = sitk.GetArrayFromImage(img)
     #data = img.get_fdata()
     print(data.shape)
